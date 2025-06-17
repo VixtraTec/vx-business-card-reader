@@ -19,9 +19,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 # Production stage
 FROM --platform=linux/amd64 public.ecr.aws/docker/library/alpine:latest
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates tzdata
-
 # Create a non-root user
 RUN addgroup -g 1001 appgroup && \
     adduser -D -s /bin/sh -u 1001 -G appgroup appuser
