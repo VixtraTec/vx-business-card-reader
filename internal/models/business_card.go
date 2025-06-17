@@ -64,8 +64,10 @@ type ImageData struct {
 	FileName    string    `json:"file_name" dynamodbav:"file_name"`
 	ContentType string    `json:"content_type" dynamodbav:"content_type"`
 	Size        int64     `json:"size" dynamodbav:"size"`
-	Data        []byte    `json:"data" dynamodbav:"data"`
-	Base64Data  string    `json:"base64_data" dynamodbav:"-"`
+	S3Key       string    `json:"s3_key" dynamodbav:"s3_key"`
+	S3URL       string    `json:"s3_url,omitempty" dynamodbav:"-"`
+	Data        []byte    `json:"-" dynamodbav:"-"`
+	Base64Data  string    `json:"base64_data,omitempty" dynamodbav:"-"`
 	UploadedAt  time.Time `json:"uploaded_at" dynamodbav:"uploaded_at"`
 }
 

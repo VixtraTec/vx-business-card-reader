@@ -71,7 +71,15 @@ func main() {
 		log.Fatal("Failed to initialize Gemini service:", err)
 	}
 
-	businessCardService := services.NewBusinessCardService(dynamoService, geminiService)
+	s3Service, err := services.NewS3Service()
+	if err != nil {
+		logger.LogError("main", err, map[string]interface{}{
+			"step": "initialize_s3_service",
+		})
+		log.Fatal("Failed to initialize S3 service:", err)
+	}
+
+	businessCardService := services.NewBusinessCardService(dynamoService, geminiService, s3Service)
 
 	// Initialize handlers
 	handler := handlers.NewBusinessCardHandler(businessCardService)
@@ -134,6 +142,7 @@ func main() {
 		api.GET("/business-cards", handler.GetBusinessCards)
 		api.GET("/business-cards/:id", handler.GetBusinessCardByID)
 		api.POST("/business-cards/:id/retry", handler.RetryFailedBusinessCard)
+		api.DELETE("/business-cards/:id", handler.DeleteBusinessCard)
 		api.GET("/business-cards/failed", handler.GetFailedBusinessCards)
 	}
 

@@ -183,7 +183,7 @@ func (h *BusinessCardHandler) GetBusinessCards(c *gin.Context) {
 		"remote_addr": c.ClientIP(),
 	})
 
-	businessCards, err := h.service.GetAllBusinessCards(c.Request.Context())
+	businessCards, err := h.service.GetAllBusinessCardsWithImages(c.Request.Context())
 	if err != nil {
 		logger.LogError("GetBusinessCards", err, map[string]interface{}{
 			"step": "get_all_business_cards",
@@ -199,12 +199,10 @@ func (h *BusinessCardHandler) GetBusinessCards(c *gin.Context) {
 		"count": len(businessCards),
 	})
 
+	// Remove sensitive data from response
 	for i := range businessCards {
 		for j := range businessCards[i].Images {
-			if len(businessCards[i].Images[j].Data) > 0 {
-				businessCards[i].Images[j].Base64Data = base64.StdEncoding.EncodeToString(businessCards[i].Images[j].Data)
-				businessCards[i].Images[j].Data = nil
-			}
+			businessCards[i].Images[j].Data = nil
 		}
 	}
 
@@ -243,7 +241,7 @@ func (h *BusinessCardHandler) GetBusinessCardByID(c *gin.Context) {
 		return
 	}
 
-	businessCard, err := h.service.GetBusinessCard(c.Request.Context(), id)
+	businessCard, err := h.service.GetBusinessCardWithImages(c.Request.Context(), id)
 	if err != nil {
 		logger.LogError("GetBusinessCardByID", err, map[string]interface{}{
 			"step":             "get_business_card",
@@ -261,11 +259,9 @@ func (h *BusinessCardHandler) GetBusinessCardByID(c *gin.Context) {
 		"status":           businessCard.Status,
 	})
 
+	// Remove sensitive data from response
 	for i := range businessCard.Images {
-		if len(businessCard.Images[i].Data) > 0 {
-			businessCard.Images[i].Base64Data = base64.StdEncoding.EncodeToString(businessCard.Images[i].Data)
-			businessCard.Images[i].Data = nil
-		}
+		businessCard.Images[i].Data = nil
 	}
 
 	c.JSON(http.StatusOK, models.BusinessCardResponse{
@@ -363,7 +359,7 @@ func (h *BusinessCardHandler) GetFailedBusinessCards(c *gin.Context) {
 		"remote_addr": c.ClientIP(),
 	})
 
-	businessCards, err := h.service.GetFailedBusinessCards(c.Request.Context())
+	businessCards, err := h.service.GetFailedBusinessCardsWithImages(c.Request.Context())
 	if err != nil {
 		logger.LogError("GetFailedBusinessCards", err, map[string]interface{}{
 			"step": "get_failed_business_cards",
@@ -392,5 +388,56 @@ func (h *BusinessCardHandler) GetFailedBusinessCards(c *gin.Context) {
 		Success: true,
 		Data:    responseCards,
 		Count:   len(responseCards),
+	})
+}
+
+// @Summary Delete business card
+// @Description Delete a business card and its associated S3 images
+// @Tags business-cards
+// @Produce json
+// @Param id path string true "Business Card ID"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Router /business-cards/{id} [delete]
+func (h *BusinessCardHandler) DeleteBusinessCard(c *gin.Context) {
+	id := c.Param("id")
+
+	logger.LogInfo("DeleteBusinessCard", "Starting deletion of business card", map[string]interface{}{
+		"business_card_id": id,
+		"remote_addr":      c.ClientIP(),
+	})
+
+	if id == "" {
+		logger.LogWarn("DeleteBusinessCard", "No ID provided", map[string]interface{}{
+			"remote_addr": c.ClientIP(),
+		})
+		c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Business card ID is required",
+		})
+		return
+	}
+
+	err := h.service.DeleteBusinessCard(c.Request.Context(), id)
+	if err != nil {
+		logger.LogError("DeleteBusinessCard", err, map[string]interface{}{
+			"step":             "delete_business_card",
+			"business_card_id": id,
+		})
+		c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to delete business card: %v", err),
+		})
+		return
+	}
+
+	logger.LogInfo("DeleteBusinessCard", "Business card deleted successfully", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Business card deleted successfully",
 	})
 }

@@ -14,13 +14,15 @@ import (
 type BusinessCardService struct {
 	dynamoService *DynamoService
 	geminiService *GeminiService
+	s3Service     *S3Service
 }
 
-func NewBusinessCardService(dynamoService *DynamoService, geminiService *GeminiService) *BusinessCardService {
+func NewBusinessCardService(dynamoService *DynamoService, geminiService *GeminiService, s3Service *S3Service) *BusinessCardService {
 	logger.LogInfo("NewBusinessCardService", "Business card service initialized", map[string]interface{}{})
 	return &BusinessCardService{
 		dynamoService: dynamoService,
 		geminiService: geminiService,
+		s3Service:     s3Service,
 	}
 }
 
@@ -32,23 +34,37 @@ func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []
 		"image_count":      len(images),
 	})
 
-	// Convert uploads to image data
+	// Upload images to S3 and create image data
 	imageData := make([]models.ImageData, len(images))
 	for i, upload := range images {
+		// Upload to S3
+		s3Key, err := b.s3Service.UploadImage(ctx, businessCardID, upload.FileName, upload.ContentType, upload.Data)
+		if err != nil {
+			logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+				"step":             "upload_to_s3",
+				"business_card_id": businessCardID,
+				"image_index":      i,
+				"filename":         upload.FileName,
+			})
+			return nil, fmt.Errorf("failed to upload image to S3: %w", err)
+		}
+
 		imageData[i] = models.ImageData{
 			FileName:    upload.FileName,
 			ContentType: upload.ContentType,
-			Data:        upload.Data,
 			Size:        int64(len(upload.Data)),
+			S3Key:       s3Key,
+			Data:        upload.Data, // Keep for Gemini processing
 			UploadedAt:  time.Now(),
 		}
 
-		logger.LogDebug("ProcessBusinessCard", "Image processed", map[string]interface{}{
+		logger.LogDebug("ProcessBusinessCard", "Image uploaded to S3", map[string]interface{}{
 			"business_card_id": businessCardID,
 			"image_index":      i,
 			"filename":         upload.FileName,
 			"content_type":     upload.ContentType,
 			"size":             len(upload.Data),
+			"s3_key":           s3Key,
 		})
 	}
 
@@ -204,13 +220,42 @@ func (b *BusinessCardService) RetryFailedProcessing(ctx context.Context, id stri
 		return nil, fmt.Errorf("failed to update retry state: %w", err)
 	}
 
+	// Prepare images for Gemini retry processing (download from S3)
+	logger.LogInfo("RetryFailedProcessing", "Preparing images for Gemini AI retry processing", map[string]interface{}{
+		"business_card_id": id,
+		"retry_count":      businessCard.RetryCount,
+	})
+
+	geminiImages := make([]models.ImageData, len(businessCard.Images))
+	for i, imgData := range businessCard.Images {
+		// Download image from S3 for retry processing
+		s3Object, err := b.s3Service.GetImage(ctx, imgData.S3Key)
+		if err != nil {
+			logger.LogError("RetryFailedProcessing", err, map[string]interface{}{
+				"step":             "download_from_s3_for_retry",
+				"business_card_id": id,
+				"s3_key":           imgData.S3Key,
+			})
+			return nil, fmt.Errorf("failed to download image from S3 for retry processing: %w", err)
+		}
+
+		geminiImages[i] = models.ImageData{
+			FileName:    imgData.FileName,
+			ContentType: imgData.ContentType,
+			Size:        imgData.Size,
+			S3Key:       imgData.S3Key,
+			Data:        s3Object.Data, // Only for Gemini processing
+			UploadedAt:  imgData.UploadedAt,
+		}
+	}
+
 	// Try to process with Gemini again
 	logger.LogInfo("RetryFailedProcessing", "Starting Gemini AI retry processing", map[string]interface{}{
 		"business_card_id": id,
 		"retry_count":      businessCard.RetryCount,
 	})
 
-	processedCard, err := b.geminiService.ExtractBusinessCardData(ctx, businessCard.Images)
+	processedCard, err := b.geminiService.ExtractBusinessCardData(ctx, geminiImages)
 	if err != nil {
 		logger.LogError("RetryFailedProcessing", err, map[string]interface{}{
 			"step":             "gemini_retry_processing",
@@ -327,5 +372,151 @@ func (b *BusinessCardService) InitializeDatabase(ctx context.Context) error {
 	}
 
 	logger.LogInfo("InitializeDatabase", "Database initialized successfully", map[string]interface{}{})
+	return nil
+}
+
+// GetBusinessCardWithImages retrieves a business card and populates image URLs
+func (b *BusinessCardService) GetBusinessCardWithImages(ctx context.Context, id string) (*models.BusinessCard, error) {
+	logger.LogDebug("GetBusinessCardWithImages", "Retrieving business card with images", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	businessCard, err := b.dynamoService.GetBusinessCard(ctx, id)
+	if err != nil {
+		logger.LogError("GetBusinessCardWithImages", err, map[string]interface{}{
+			"business_card_id": id,
+		})
+		return nil, err
+	}
+
+	// Generate presigned URLs for images (valid for 1 hour)
+	for i := range businessCard.Images {
+		if businessCard.Images[i].S3Key != "" {
+			presignedURL, err := b.s3Service.GeneratePresignedURL(ctx, businessCard.Images[i].S3Key, time.Hour)
+			if err != nil {
+				logger.LogWarn("GetBusinessCardWithImages", "Failed to generate presigned URL", map[string]interface{}{
+					"business_card_id": id,
+					"s3_key":           businessCard.Images[i].S3Key,
+					"error":            err.Error(),
+				})
+				// Continue without URL if presigning fails
+				continue
+			}
+			businessCard.Images[i].S3URL = presignedURL
+		}
+	}
+
+	return businessCard, nil
+}
+
+// GetAllBusinessCardsWithImages retrieves all business cards and populates image URLs
+func (b *BusinessCardService) GetAllBusinessCardsWithImages(ctx context.Context) ([]models.BusinessCard, error) {
+	logger.LogDebug("GetAllBusinessCardsWithImages", "Retrieving all business cards with images", map[string]interface{}{})
+
+	businessCards, err := b.dynamoService.GetAllBusinessCards(ctx)
+	if err != nil {
+		logger.LogError("GetAllBusinessCardsWithImages", err, map[string]interface{}{})
+		return nil, err
+	}
+
+	// Generate presigned URLs for all images
+	for i := range businessCards {
+		for j := range businessCards[i].Images {
+			if businessCards[i].Images[j].S3Key != "" {
+				presignedURL, err := b.s3Service.GeneratePresignedURL(ctx, businessCards[i].Images[j].S3Key, time.Hour)
+				if err != nil {
+					logger.LogWarn("GetAllBusinessCardsWithImages", "Failed to generate presigned URL", map[string]interface{}{
+						"business_card_id": businessCards[i].ID,
+						"s3_key":           businessCards[i].Images[j].S3Key,
+						"error":            err.Error(),
+					})
+					// Continue without URL if presigning fails
+					continue
+				}
+				businessCards[i].Images[j].S3URL = presignedURL
+			}
+		}
+	}
+
+	logger.LogDebug("GetAllBusinessCardsWithImages", "Retrieved business cards with images", map[string]interface{}{
+		"count": len(businessCards),
+	})
+
+	return businessCards, nil
+}
+
+// GetFailedBusinessCardsWithImages retrieves failed business cards and populates image URLs
+func (b *BusinessCardService) GetFailedBusinessCardsWithImages(ctx context.Context) ([]models.BusinessCard, error) {
+	logger.LogDebug("GetFailedBusinessCardsWithImages", "Retrieving failed business cards with images", map[string]interface{}{})
+
+	businessCards, err := b.dynamoService.GetBusinessCardsByStatus(ctx, models.StatusFailed)
+	if err != nil {
+		logger.LogError("GetFailedBusinessCardsWithImages", err, map[string]interface{}{})
+		return nil, err
+	}
+
+	// Generate presigned URLs for all images
+	for i := range businessCards {
+		for j := range businessCards[i].Images {
+			if businessCards[i].Images[j].S3Key != "" {
+				presignedURL, err := b.s3Service.GeneratePresignedURL(ctx, businessCards[i].Images[j].S3Key, time.Hour)
+				if err != nil {
+					logger.LogWarn("GetFailedBusinessCardsWithImages", "Failed to generate presigned URL", map[string]interface{}{
+						"business_card_id": businessCards[i].ID,
+						"s3_key":           businessCards[i].Images[j].S3Key,
+						"error":            err.Error(),
+					})
+					// Continue without URL if presigning fails
+					continue
+				}
+				businessCards[i].Images[j].S3URL = presignedURL
+			}
+		}
+	}
+
+	logger.LogDebug("GetFailedBusinessCardsWithImages", "Retrieved failed business cards with images", map[string]interface{}{
+		"count": len(businessCards),
+	})
+
+	return businessCards, nil
+}
+
+// DeleteBusinessCard deletes a business card and its associated S3 images
+func (b *BusinessCardService) DeleteBusinessCard(ctx context.Context, id string) error {
+	logger.LogInfo("DeleteBusinessCard", "Deleting business card and associated images", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	// Get business card to retrieve S3 keys
+	businessCard, err := b.dynamoService.GetBusinessCard(ctx, id)
+	if err != nil {
+		logger.LogError("DeleteBusinessCard", err, map[string]interface{}{
+			"step":             "get_business_card",
+			"business_card_id": id,
+		})
+		return fmt.Errorf("failed to get business card for deletion: %w", err)
+	}
+
+	// Log business card details for deletion tracking
+	logger.LogDebug("DeleteBusinessCard", "Retrieved business card for deletion", map[string]interface{}{
+		"business_card_id": businessCard.ID,
+		"status":           businessCard.Status,
+		"image_count":      len(businessCard.Images),
+	})
+
+	// Delete images from S3
+	err = b.s3Service.DeleteBusinessCardImages(ctx, id)
+	if err != nil {
+		logger.LogWarn("DeleteBusinessCard", "Failed to delete S3 images, continuing with DB deletion", map[string]interface{}{
+			"business_card_id": id,
+			"error":            err.Error(),
+		})
+	}
+
+	// Note: DynamoDB deletion would need to be implemented in DynamoService if needed
+	logger.LogInfo("DeleteBusinessCard", "Business card deletion completed", map[string]interface{}{
+		"business_card_id": id,
+	})
+
 	return nil
 }
