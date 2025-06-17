@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"business-card-reader/internal/logger"
 	"business-card-reader/internal/models"
 
 	"google.golang.org/genai"
@@ -16,14 +17,25 @@ type GeminiService struct {
 }
 
 func NewGeminiService(apiKey string, modelName string) (*GeminiService, error) {
+	logger.LogInfo("NewGeminiService", "Initializing Gemini service", map[string]interface{}{
+		"model_name": modelName,
+	})
+
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
+		logger.LogError("NewGeminiService", err, map[string]interface{}{
+			"step": "create_client",
+		})
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
+
+	logger.LogInfo("NewGeminiService", "Gemini service initialized successfully", map[string]interface{}{
+		"model_name": modelName,
+	})
 
 	return &GeminiService{
 		client:    client,
@@ -32,33 +44,66 @@ func NewGeminiService(apiKey string, modelName string) (*GeminiService, error) {
 }
 
 func (g *GeminiService) ExtractBusinessCardData(ctx context.Context, images []models.ImageData) (*models.BusinessCard, error) {
+	logger.LogInfo("ExtractBusinessCardData", "Starting Gemini AI processing", map[string]interface{}{
+		"image_count": len(images),
+		"model_name":  g.modelName,
+	})
+
 	prompt := g.buildExtractionPrompt()
 
 	// Prepare parts for the request
 	parts := []*genai.Part{{Text: prompt}}
 
 	// Add images to the request
-	for _, img := range images {
+	for i, img := range images {
+		logger.LogDebug("ExtractBusinessCardData", "Adding image to request", map[string]interface{}{
+			"image_index":  i,
+			"content_type": img.ContentType,
+			"size":         img.Size,
+			"filename":     img.FileName,
+		})
+
 		parts = append(parts, &genai.Part{
 			InlineData: &genai.Blob{Data: img.Data, MIMEType: img.ContentType},
 		})
 	}
 
+	logger.LogInfo("ExtractBusinessCardData", "Sending request to Gemini AI", map[string]interface{}{
+		"total_parts": len(parts),
+		"model_name":  g.modelName,
+	})
+
 	contents := []*genai.Content{{Parts: parts}}
 	resp, err := g.client.Models.GenerateContent(ctx, g.modelName, contents, nil)
 	if err != nil {
+		logger.LogError("ExtractBusinessCardData", err, map[string]interface{}{
+			"step":       "generate_content",
+			"model_name": g.modelName,
+		})
 		return nil, fmt.Errorf("failed to generate content: %w", err)
 	}
 
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		logger.LogError("ExtractBusinessCardData", fmt.Errorf("no content generated"), map[string]interface{}{
+			"step":             "validate_response",
+			"candidates_count": len(resp.Candidates),
+		})
 		return nil, fmt.Errorf("no content generated")
 	}
 
 	// Extract the JSON response
 	responseText := fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0].Text)
 
+	logger.LogDebug("ExtractBusinessCardData", "Received response from Gemini", map[string]interface{}{
+		"response_length": len(responseText),
+	})
+
 	// Clean the response to extract JSON
 	jsonStr := g.extractJSONFromResponse(responseText)
+
+	logger.LogDebug("ExtractBusinessCardData", "Extracted JSON from response", map[string]interface{}{
+		"json_length": len(jsonStr),
+	})
 
 	// Parse the extracted data
 	var extractedData struct {
@@ -67,8 +112,19 @@ func (g *GeminiService) ExtractBusinessCardData(ctx context.Context, images []mo
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &extractedData); err != nil {
+		logger.LogError("ExtractBusinessCardData", err, map[string]interface{}{
+			"step":        "parse_json",
+			"json_string": jsonStr,
+		})
 		return nil, fmt.Errorf("failed to parse extracted data: %w", err)
 	}
+
+	logger.LogInfo("ExtractBusinessCardData", "Business card data extracted successfully", map[string]interface{}{
+		"personal_name": extractedData.PersonalData.FullName,
+		"company_name":  extractedData.CompanyData.Name,
+		"has_email":     extractedData.PersonalData.Email != "",
+		"has_phone":     extractedData.PersonalData.Phone != "",
+	})
 
 	businessCard := &models.BusinessCard{
 		PersonalData:  extractedData.PersonalData,

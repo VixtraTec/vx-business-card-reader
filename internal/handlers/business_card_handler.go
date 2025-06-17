@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"business-card-reader/internal/logger"
 	"business-card-reader/internal/models"
 	"business-card-reader/internal/services"
 
@@ -26,26 +27,38 @@ func NewBusinessCardHandler(service *services.BusinessCardService) *BusinessCard
 // @Summary Process business card images
 // @Description Upload and process business card images using Gemini AI
 // @Tags business-cards
-// @Accept multipart/form-data
+// @Accept json
 // @Produce json
-// @Param images formData file true "Business card images (max 2)"
+// @Param request body models.BusinessCardRequestBase64 true "Business card images in base64 format"
 // @Success 200 {object} models.BusinessCardResponse
 // @Failure 400 {object} models.BusinessCardResponse
 // @Failure 500 {object} models.BusinessCardResponse
 // @Router /business-cards [post]
 func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
-	// Parse multipart form
-	err := c.Request.ParseMultipartForm(10 << 20) // 10 MB max
-	if err != nil {
+	logger.LogInfo("ProcessBusinessCard", "Starting business card processing", map[string]interface{}{
+		"user_agent":   c.GetHeader("User-Agent"),
+		"remote_addr":  c.ClientIP(),
+		"content_type": c.GetHeader("Content-Type"),
+	})
+
+	// Parse JSON request
+	var request models.BusinessCardRequestBase64
+	if err := c.ShouldBindJSON(&request); err != nil {
+		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+			"step":        "parse_json_request",
+			"remote_addr": c.ClientIP(),
+		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
-			Error:   "Failed to parse form data",
+			Error:   "Invalid JSON request format",
 		})
 		return
 	}
 
-	files := c.Request.MultipartForm.File["images"]
-	if len(files) == 0 {
+	if len(request.Images) == 0 {
+		logger.LogWarn("ProcessBusinessCard", "No images provided", map[string]interface{}{
+			"remote_addr": c.ClientIP(),
+		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
 			Error:   "At least one image is required",
@@ -53,7 +66,11 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 		return
 	}
 
-	if len(files) > 2 {
+	if len(request.Images) > 2 {
+		logger.LogWarn("ProcessBusinessCard", "Too many images provided", map[string]interface{}{
+			"remote_addr": c.ClientIP(),
+			"file_count":  len(request.Images),
+		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
 			Error:   "Maximum of 2 images allowed",
@@ -61,40 +78,65 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 		return
 	}
 
+	logger.LogInfo("ProcessBusinessCard", "Processing uploaded files", map[string]interface{}{
+		"file_count":   len(request.Images),
+		"timestamp":    request.Timestamp,
+		"total_images": request.TotalImages,
+	})
+
 	var imageUploads []models.ImageUpload
-	for _, fileHeader := range files {
+	for i, imageBase64 := range request.Images {
 		// Validate file type
-		if !isValidImageType(fileHeader.Header.Get("Content-Type")) {
+		if !isValidImageType(imageBase64.ContentType) {
+			logger.LogError("ProcessBusinessCard", fmt.Errorf("invalid file type: %s", imageBase64.ContentType), map[string]interface{}{
+				"step":         "validate_file_type",
+				"content_type": imageBase64.ContentType,
+				"filename":     imageBase64.FileName,
+				"file_index":   i,
+			})
 			c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 				Success: false,
-				Error:   fmt.Sprintf("Invalid file type: %s. Only JPEG, PNG, and WebP are allowed", fileHeader.Header.Get("Content-Type")),
+				Error:   fmt.Sprintf("Invalid file type: %s. Only JPEG, PNG, and WebP are allowed", imageBase64.ContentType),
 			})
 			return
 		}
 
-		// Open and read file
-		file, err := fileHeader.Open()
+		// Decode base64 data
+		data, err := base64.StdEncoding.DecodeString(imageBase64.Base64Data)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
+			logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+				"step":       "decode_base64",
+				"filename":   imageBase64.FileName,
+				"file_index": i,
+			})
+			c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 				Success: false,
-				Error:   "Failed to read uploaded file",
+				Error:   "Failed to decode base64 image data",
 			})
 			return
 		}
-		defer file.Close()
 
-		data, err := io.ReadAll(file)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
-				Success: false,
-				Error:   "Failed to read file content",
+		// Validate decoded size matches expected size
+		if int64(len(data)) != imageBase64.Size {
+			logger.LogWarn("ProcessBusinessCard", "Size mismatch between decoded data and expected size", map[string]interface{}{
+				"filename":      imageBase64.FileName,
+				"expected_size": imageBase64.Size,
+				"actual_size":   len(data),
+				"file_index":    i,
 			})
-			return
 		}
+
+		logger.LogInfo("ProcessBusinessCard", "Image processed successfully", map[string]interface{}{
+			"filename":      imageBase64.FileName,
+			"file_size":     len(data),
+			"expected_size": imageBase64.Size,
+			"file_index":    i,
+			"content_type":  imageBase64.ContentType,
+		})
 
 		imageUploads = append(imageUploads, models.ImageUpload{
-			FileName:    fileHeader.Filename,
-			ContentType: fileHeader.Header.Get("Content-Type"),
+			FileName:    imageBase64.FileName,
+			ContentType: imageBase64.ContentType,
 			Data:        data,
 		})
 	}
@@ -102,12 +144,21 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 	// Process the business card
 	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads)
 	if err != nil {
+		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+			"step":       "process_business_card",
+			"file_count": len(imageUploads),
+		})
 		c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to process business card: %v", err),
 		})
 		return
 	}
+
+	logger.LogInfo("ProcessBusinessCard", "Business card processed successfully", map[string]interface{}{
+		"business_card_id": businessCard.ID,
+		"status":           businessCard.Status,
+	})
 
 	// Remove image data from response to keep it lightweight
 	responseCard := *businessCard
@@ -129,14 +180,25 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 // @Failure 500 {object} models.BusinessCardListResponse
 // @Router /business-cards [get]
 func (h *BusinessCardHandler) GetBusinessCards(c *gin.Context) {
+	logger.LogInfo("GetBusinessCards", "Retrieving all business cards", map[string]interface{}{
+		"remote_addr": c.ClientIP(),
+	})
+
 	businessCards, err := h.service.GetAllBusinessCards(c.Request.Context())
 	if err != nil {
+		logger.LogError("GetBusinessCards", err, map[string]interface{}{
+			"step": "get_all_business_cards",
+		})
 		c.JSON(http.StatusInternalServerError, models.BusinessCardListResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to retrieve business cards: %v", err),
 		})
 		return
 	}
+
+	logger.LogInfo("GetBusinessCards", "Business cards retrieved successfully", map[string]interface{}{
+		"count": len(businessCards),
+	})
 
 	for i := range businessCards {
 		for j := range businessCards[i].Images {
@@ -165,7 +227,16 @@ func (h *BusinessCardHandler) GetBusinessCards(c *gin.Context) {
 // @Router /business-cards/{id} [get]
 func (h *BusinessCardHandler) GetBusinessCardByID(c *gin.Context) {
 	id := c.Param("id")
+
+	logger.LogInfo("GetBusinessCardByID", "Retrieving business card by ID", map[string]interface{}{
+		"business_card_id": id,
+		"remote_addr":      c.ClientIP(),
+	})
+
 	if id == "" {
+		logger.LogWarn("GetBusinessCardByID", "No ID provided", map[string]interface{}{
+			"remote_addr": c.ClientIP(),
+		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
 			Error:   "Business card ID is required",
@@ -175,12 +246,21 @@ func (h *BusinessCardHandler) GetBusinessCardByID(c *gin.Context) {
 
 	businessCard, err := h.service.GetBusinessCard(c.Request.Context(), id)
 	if err != nil {
+		logger.LogError("GetBusinessCardByID", err, map[string]interface{}{
+			"step":             "get_business_card",
+			"business_card_id": id,
+		})
 		c.JSON(http.StatusNotFound, models.BusinessCardResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Business card not found: %v", err),
 		})
 		return
 	}
+
+	logger.LogInfo("GetBusinessCardByID", "Business card retrieved successfully", map[string]interface{}{
+		"business_card_id": id,
+		"status":           businessCard.Status,
+	})
 
 	for i := range businessCard.Images {
 		if len(businessCard.Images[i].Data) > 0 {
@@ -224,7 +304,16 @@ func isValidImageType(contentType string) bool {
 // @Router /business-cards/{id}/retry [post]
 func (h *BusinessCardHandler) RetryFailedBusinessCard(c *gin.Context) {
 	id := c.Param("id")
+
+	logger.LogInfo("RetryFailedBusinessCard", "Starting retry for failed business card", map[string]interface{}{
+		"business_card_id": id,
+		"remote_addr":      c.ClientIP(),
+	})
+
 	if id == "" {
+		logger.LogWarn("RetryFailedBusinessCard", "No ID provided", map[string]interface{}{
+			"remote_addr": c.ClientIP(),
+		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
 			Error:   "Business card ID is required",
@@ -234,12 +323,22 @@ func (h *BusinessCardHandler) RetryFailedBusinessCard(c *gin.Context) {
 
 	businessCard, err := h.service.RetryFailedProcessing(c.Request.Context(), id)
 	if err != nil {
+		logger.LogError("RetryFailedBusinessCard", err, map[string]interface{}{
+			"step":             "retry_failed_processing",
+			"business_card_id": id,
+		})
 		c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to retry processing: %v", err),
 		})
 		return
 	}
+
+	logger.LogInfo("RetryFailedBusinessCard", "Business card retry completed", map[string]interface{}{
+		"business_card_id": id,
+		"status":           businessCard.Status,
+		"retry_count":      businessCard.RetryCount,
+	})
 
 	// Remove image data from response to keep it lightweight
 	responseCard := *businessCard
@@ -261,14 +360,25 @@ func (h *BusinessCardHandler) RetryFailedBusinessCard(c *gin.Context) {
 // @Failure 500 {object} models.BusinessCardListResponse
 // @Router /business-cards/failed [get]
 func (h *BusinessCardHandler) GetFailedBusinessCards(c *gin.Context) {
+	logger.LogInfo("GetFailedBusinessCards", "Retrieving failed business cards", map[string]interface{}{
+		"remote_addr": c.ClientIP(),
+	})
+
 	businessCards, err := h.service.GetFailedBusinessCards(c.Request.Context())
 	if err != nil {
+		logger.LogError("GetFailedBusinessCards", err, map[string]interface{}{
+			"step": "get_failed_business_cards",
+		})
 		c.JSON(http.StatusInternalServerError, models.BusinessCardListResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to retrieve failed business cards: %v", err),
 		})
 		return
 	}
+
+	logger.LogInfo("GetFailedBusinessCards", "Failed business cards retrieved successfully", map[string]interface{}{
+		"count": len(businessCards),
+	})
 
 	// Remove image data from response to keep it lightweight
 	responseCards := make([]models.BusinessCard, len(businessCards))
