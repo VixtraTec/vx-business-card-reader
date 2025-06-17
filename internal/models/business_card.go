@@ -81,6 +81,22 @@ type ImageUpload struct {
 	Data        []byte `json:"data"`
 }
 
+// ImageUploadBase64 represents an uploaded image with base64 data
+type ImageUploadBase64 struct {
+	FileName     string `json:"file_name"`
+	ContentType  string `json:"content_type"`
+	Size         int64  `json:"size"`
+	Base64Data   string `json:"base64_data"`
+	LastModified int64  `json:"last_modified"`
+}
+
+// BusinessCardRequestBase64 represents the new request payload with base64 images
+type BusinessCardRequestBase64 struct {
+	Images      []ImageUploadBase64 `json:"images"`
+	Timestamp   string              `json:"timestamp"`
+	TotalImages int                 `json:"total_images"`
+}
+
 // BusinessCardResponse represents the API response
 type BusinessCardResponse struct {
 	Success bool         `json:"success"`

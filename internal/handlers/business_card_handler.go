@@ -27,9 +27,9 @@ func NewBusinessCardHandler(service *services.BusinessCardService) *BusinessCard
 // @Summary Process business card images
 // @Description Upload and process business card images using Gemini AI
 // @Tags business-cards
-// @Accept multipart/form-data
+// @Accept json
 // @Produce json
-// @Param images formData file true "Business card images (max 2)"
+// @Param request body models.BusinessCardRequestBase64 true "Business card images in base64 format"
 // @Success 200 {object} models.BusinessCardResponse
 // @Failure 400 {object} models.BusinessCardResponse
 // @Failure 500 {object} models.BusinessCardResponse
@@ -41,22 +41,21 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 		"content_type": c.GetHeader("Content-Type"),
 	})
 
-	// Parse multipart form
-	err := c.Request.ParseMultipartForm(10 << 20) // 10 MB max
-	if err != nil {
+	// Parse JSON request
+	var request models.BusinessCardRequestBase64
+	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
-			"step":        "parse_multipart_form",
+			"step":        "parse_json_request",
 			"remote_addr": c.ClientIP(),
 		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
-			Error:   "Failed to parse form data",
+			Error:   "Invalid JSON request format",
 		})
 		return
 	}
 
-	files := c.Request.MultipartForm.File["images"]
-	if len(files) == 0 {
+	if len(request.Images) == 0 {
 		logger.LogWarn("ProcessBusinessCard", "No images provided", map[string]interface{}{
 			"remote_addr": c.ClientIP(),
 		})
@@ -67,10 +66,10 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 		return
 	}
 
-	if len(files) > 2 {
+	if len(request.Images) > 2 {
 		logger.LogWarn("ProcessBusinessCard", "Too many images provided", map[string]interface{}{
 			"remote_addr": c.ClientIP(),
-			"file_count":  len(files),
+			"file_count":  len(request.Images),
 		})
 		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 			Success: false,
@@ -80,65 +79,64 @@ func (h *BusinessCardHandler) ProcessBusinessCard(c *gin.Context) {
 	}
 
 	logger.LogInfo("ProcessBusinessCard", "Processing uploaded files", map[string]interface{}{
-		"file_count": len(files),
+		"file_count":   len(request.Images),
+		"timestamp":    request.Timestamp,
+		"total_images": request.TotalImages,
 	})
 
 	var imageUploads []models.ImageUpload
-	for i, fileHeader := range files {
+	for i, imageBase64 := range request.Images {
 		// Validate file type
-		if !isValidImageType(fileHeader.Header.Get("Content-Type")) {
-			logger.LogError("ProcessBusinessCard", fmt.Errorf("invalid file type: %s", fileHeader.Header.Get("Content-Type")), map[string]interface{}{
+		if !isValidImageType(imageBase64.ContentType) {
+			logger.LogError("ProcessBusinessCard", fmt.Errorf("invalid file type: %s", imageBase64.ContentType), map[string]interface{}{
 				"step":         "validate_file_type",
-				"content_type": fileHeader.Header.Get("Content-Type"),
-				"filename":     fileHeader.Filename,
+				"content_type": imageBase64.ContentType,
+				"filename":     imageBase64.FileName,
 				"file_index":   i,
 			})
 			c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 				Success: false,
-				Error:   fmt.Sprintf("Invalid file type: %s. Only JPEG, PNG, and WebP are allowed", fileHeader.Header.Get("Content-Type")),
+				Error:   fmt.Sprintf("Invalid file type: %s. Only JPEG, PNG, and WebP are allowed", imageBase64.ContentType),
 			})
 			return
 		}
 
-		// Open and read file
-		file, err := fileHeader.Open()
+		// Decode base64 data
+		data, err := base64.StdEncoding.DecodeString(imageBase64.Base64Data)
 		if err != nil {
 			logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
-				"step":       "open_file",
-				"filename":   fileHeader.Filename,
+				"step":       "decode_base64",
+				"filename":   imageBase64.FileName,
 				"file_index": i,
 			})
-			c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
+			c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
 				Success: false,
-				Error:   "Failed to read uploaded file",
-			})
-			return
-		}
-		defer file.Close()
-
-		data, err := io.ReadAll(file)
-		if err != nil {
-			logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
-				"step":       "read_file_content",
-				"filename":   fileHeader.Filename,
-				"file_index": i,
-			})
-			c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
-				Success: false,
-				Error:   "Failed to read file content",
+				Error:   "Failed to decode base64 image data",
 			})
 			return
 		}
 
-		logger.LogInfo("ProcessBusinessCard", "File processed successfully", map[string]interface{}{
-			"filename":   fileHeader.Filename,
-			"file_size":  len(data),
-			"file_index": i,
+		// Validate decoded size matches expected size
+		if int64(len(data)) != imageBase64.Size {
+			logger.LogWarn("ProcessBusinessCard", "Size mismatch between decoded data and expected size", map[string]interface{}{
+				"filename":      imageBase64.FileName,
+				"expected_size": imageBase64.Size,
+				"actual_size":   len(data),
+				"file_index":    i,
+			})
+		}
+
+		logger.LogInfo("ProcessBusinessCard", "Image processed successfully", map[string]interface{}{
+			"filename":      imageBase64.FileName,
+			"file_size":     len(data),
+			"expected_size": imageBase64.Size,
+			"file_index":    i,
+			"content_type":  imageBase64.ContentType,
 		})
 
 		imageUploads = append(imageUploads, models.ImageUpload{
-			FileName:    fileHeader.Filename,
-			ContentType: fileHeader.Header.Get("Content-Type"),
+			FileName:    imageBase64.FileName,
+			ContentType: imageBase64.ContentType,
 			Data:        data,
 		})
 	}
