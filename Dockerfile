@@ -4,9 +4,6 @@ FROM --platform=linux/amd64 public.ecr.aws/docker/library/golang:1.23-alpine AS 
 # Set working directory
 WORKDIR /app
 
-# Install necessary packages for building
-RUN apk add --no-cache git ca-certificates tzdata
-
 # Copy go mod and sum files
 COPY go.mod go.sum ./
 
