@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/base64"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
