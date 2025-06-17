@@ -9,6 +9,9 @@ A Go-based REST API that processes business card images using Google's Gemini AI
 - **Data Storage**: Stores images and extracted data in AWS DynamoDB
 - **Structured Output**: Consistent JSON format for all extracted data
 - **REST API**: Clean endpoints for processing and retrieving business card data
+- **Retry Failed Processing**: Ability to retry processing for failed business cards
+- **Swagger Documentation**: Comprehensive API documentation
+- **Comprehensive Logging**: Detailed logging system
 
 ## Project Structure
 
@@ -214,6 +217,88 @@ Check if the service is running.
 }
 ```
 
+### 5. Retry Failed Processing
+**POST** `/api/v1/business-cards/{id}/retry`
+
+Retry processing for a failed business card.
+
+**Request:**
+- No additional request body or parameters
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-string",
+    "personal_data": {
+      "full_name": "John Doe",
+      "first_name": "John",
+      "last_name": "Doe",
+      "job_title": "Software Engineer",
+      "department": "Engineering",
+      "email": "john.doe@example.com",
+      "phone": "+1-555-0123",
+      "mobile": "+1-555-0124",
+      "linkedin": "linkedin.com/in/johndoe",
+      "website": "johndoe.dev"
+    },
+    "company_data": {
+      "name": "Tech Corp",
+      "industry": "Technology",
+      "website": "techcorp.com",
+      "email": "info@techcorp.com",
+      "phone": "+1-555-0100",
+      "address": {
+        "street": "123 Tech Street",
+        "city": "San Francisco",
+        "state": "CA",
+        "postal_code": "94105",
+        "country": "USA",
+        "full": "123 Tech Street, San Francisco, CA 94105, USA"
+      },
+      "social_media": {
+        "linkedin": "linkedin.com/company/techcorp",
+        "twitter": "@techcorp",
+        "facebook": "facebook.com/techcorp",
+        "instagram": "@techcorp"
+      }
+    },
+    "processed_at": "2024-01-15T10:30:00Z",
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### 6. Get Failed Business Cards
+**GET** `/api/v1/business-cards/failed`
+
+Retrieve all failed business cards.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [...],
+  "count": 10
+}
+```
+
+### 7. API Documentation
+**GET** `/swagger/`
+
+Retrieve Swagger documentation for the API.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "swagger_url": "http://localhost:8080/swagger/swagger.json"
+  }
+}
+```
+
 ## Example Usage
 
 ### Using cURL
@@ -288,12 +373,14 @@ go test ./...
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini AI API key | Required |
+| `GEMINI_MODEL_NAME` | Gemini model to use | `gemini-1.5-flash` |
 | `AWS_REGION` | AWS region for DynamoDB | `us-east-1` |
 | `AWS_ACCESS_KEY_ID` | AWS access key | Required |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | Required |
 | `DYNAMODB_TABLE_NAME` | DynamoDB table name | `business-cards` |
 | `PORT` | Server port | `8080` |
 | `GIN_MODE` | Gin framework mode | `debug` |
+| `LOG_LEVEL` | Logging level | `info` |
 
 ## Deployment
 
@@ -327,4 +414,60 @@ The application can be deployed to AWS Lambda with minimal modifications using t
 
 ## License
 
-This project is licensed under the MIT License. 
+This project is licensed under the MIT License.
+
+## Logging
+
+The application includes a comprehensive logging system that tracks all operations:
+
+### Log Levels
+
+- **DEBUG**: Detailed information for debugging
+- **INFO**: General information about application flow
+- **WARN**: Warning messages for potential issues
+- **ERROR**: Error messages for failed operations
+
+### Logged Operations
+
+1. **HTTP Requests**: All incoming requests and responses
+2. **Business Card Processing**: Complete processing pipeline
+3. **Database Operations**: DynamoDB read/write operations
+4. **AI Processing**: Gemini AI interactions
+5. **Error Handling**: Detailed error information with context
+
+### Log Format
+
+Logs are output in JSON format with structured fields:
+
+```json
+{
+  "level": "info",
+  "time": "2024-01-01 12:00:00",
+  "operation": "ProcessBusinessCard",
+  "message": "Starting business card processing",
+  "business_card_id": "uuid-here",
+  "image_count": 2
+}
+```
+
+### Viewing Logs
+
+When running locally, logs are output to stdout. In production, you can:
+
+1. Redirect logs to a file:
+   ```bash
+   go run main.go > app.log 2>&1
+   ```
+
+2. Use log aggregation services like CloudWatch, ELK Stack, or similar
+
+3. Monitor specific operations by filtering JSON logs:
+   ```bash
+   go run main.go | jq 'select(.operation == "ProcessBusinessCard")'
+   ```
+
+This comprehensive logging helps with:
+- Debugging production issues
+- Monitoring application performance
+- Tracking user behavior
+- Identifying bottlenecks in the processing pipeline 
