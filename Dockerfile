@@ -19,10 +19,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 # Production stage
 FROM --platform=linux/amd64 public.ecr.aws/docker/library/alpine:latest
 
-# Create a non-root user
-RUN addgroup -g 1001 appgroup && \
-    adduser -D -s /bin/sh -u 1001 -G appgroup appuser
-
 WORKDIR /home/appuser/
 
 # Copy the binary from builder stage
