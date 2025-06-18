@@ -8,7 +8,6 @@ import (
 	"business-card-reader/docs"
 	"business-card-reader/internal/config"
 	"business-card-reader/internal/handlers"
-	"business-card-reader/internal/logger"
 	"business-card-reader/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -23,9 +22,6 @@ import (
 // @host localhost:8080
 // @BasePath /api/v1
 func main() {
-	// Initialize logger first
-	logger.Init()
-
 	// Load .env file
 	_ = godotenv.Load()
 
@@ -57,58 +53,21 @@ func main() {
 	// Initialize services
 	dynamoService, err := services.NewDynamoService(cfg.AWS.Region)
 	if err != nil {
-		logger.LogError("main", err, map[string]interface{}{
-			"step": "initialize_dynamo_service",
-		})
 		log.Fatal("Failed to initialize DynamoDB service:", err)
 	}
 
 	geminiService, err := services.NewGeminiService(cfg.Gemini.APIKey, cfg.Gemini.ModelName)
 	if err != nil {
-		logger.LogError("main", err, map[string]interface{}{
-			"step": "initialize_gemini_service",
-		})
 		log.Fatal("Failed to initialize Gemini service:", err)
 	}
 
-	s3Service, err := services.NewS3Service()
-	if err != nil {
-		logger.LogError("main", err, map[string]interface{}{
-			"step": "initialize_s3_service",
-		})
-		log.Fatal("Failed to initialize S3 service:", err)
-	}
-
-	businessCardService := services.NewBusinessCardService(dynamoService, geminiService, s3Service)
+	businessCardService := services.NewBusinessCardService(dynamoService, geminiService)
 
 	// Initialize handlers
 	handler := handlers.NewBusinessCardHandler(businessCardService)
 
 	// Setup router
 	router := gin.Default()
-
-	// Add request logging middleware
-	router.Use(func(c *gin.Context) {
-		logger.LogInfo("HTTP_REQUEST", "Incoming request", map[string]interface{}{
-			"method":         c.Request.Method,
-			"path":           c.Request.URL.Path,
-			"remote_addr":    c.ClientIP(),
-			"user_agent":     c.GetHeader("User-Agent"),
-			"content_type":   c.GetHeader("Content-Type"),
-			"content_length": c.Request.ContentLength,
-		})
-
-		// Process request
-		c.Next()
-
-		// Log response
-		logger.LogInfo("HTTP_RESPONSE", "Request completed", map[string]interface{}{
-			"method":      c.Request.Method,
-			"path":        c.Request.URL.Path,
-			"status_code": c.Writer.Status(),
-			"remote_addr": c.ClientIP(),
-		})
-	})
 
 	// Add CORS middleware
 	router.Use(func(c *gin.Context) {
@@ -142,7 +101,6 @@ func main() {
 		api.GET("/business-cards", handler.GetBusinessCards)
 		api.GET("/business-cards/:id", handler.GetBusinessCardByID)
 		api.POST("/business-cards/:id/retry", handler.RetryFailedBusinessCard)
-		api.DELETE("/business-cards/:id", handler.DeleteBusinessCard)
 		api.GET("/business-cards/failed", handler.GetFailedBusinessCards)
 	}
 
@@ -155,11 +113,6 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-
-	logger.LogInfo("main", "Starting server", map[string]interface{}{
-		"port":     port,
-		"gin_mode": os.Getenv("GIN_MODE"),
-	})
 
 	log.Printf("Server starting on port %s", port)
 	log.Fatal(router.Run(":" + port))

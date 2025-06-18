@@ -64,10 +64,8 @@ type ImageData struct {
 	FileName    string    `json:"file_name" dynamodbav:"file_name"`
 	ContentType string    `json:"content_type" dynamodbav:"content_type"`
 	Size        int64     `json:"size" dynamodbav:"size"`
-	S3Key       string    `json:"s3_key" dynamodbav:"s3_key"`
-	S3URL       string    `json:"s3_url,omitempty" dynamodbav:"-"`
-	Data        []byte    `json:"-" dynamodbav:"-"`
-	Base64Data  string    `json:"base64_data,omitempty" dynamodbav:"-"`
+	Data        []byte    `json:"data" dynamodbav:"data"`
+	Base64Data  string    `json:"base64_data" dynamodbav:"-"`
 	UploadedAt  time.Time `json:"uploaded_at" dynamodbav:"uploaded_at"`
 }
 
@@ -81,22 +79,6 @@ type ImageUpload struct {
 	FileName    string `json:"file_name"`
 	ContentType string `json:"content_type"`
 	Data        []byte `json:"data"`
-}
-
-// ImageUploadBase64 represents an uploaded image with base64 data
-type ImageUploadBase64 struct {
-	FileName     string `json:"file_name"`
-	ContentType  string `json:"content_type"`
-	Size         int64  `json:"size"`
-	Base64Data   string `json:"base64_data"`
-	LastModified int64  `json:"last_modified"`
-}
-
-// BusinessCardRequestBase64 represents the new request payload with base64 images
-type BusinessCardRequestBase64 struct {
-	Images      []ImageUploadBase64 `json:"images"`
-	Timestamp   string              `json:"timestamp"`
-	TotalImages int                 `json:"total_images"`
 }
 
 // BusinessCardResponse represents the API response
