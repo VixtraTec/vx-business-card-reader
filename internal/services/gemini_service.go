@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"business-card-reader/internal/logger"
 	"business-card-reader/internal/models"
 
 	"google.golang.org/genai"
@@ -25,6 +26,10 @@ func NewGeminiService(apiKey string, modelName string) (*GeminiService, error) {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
+	logger.LogInfo("GeminiService", "Initialized Gemini service", map[string]interface{}{
+		"model_name": modelName,
+	})
+
 	return &GeminiService{
 		client:    client,
 		modelName: modelName,
@@ -32,33 +37,111 @@ func NewGeminiService(apiKey string, modelName string) (*GeminiService, error) {
 }
 
 func (g *GeminiService) ExtractBusinessCardData(ctx context.Context, images []models.ImageData) (*models.BusinessCard, error) {
+	logger.LogInfo("ExtractBusinessCardData", "Starting Gemini processing", map[string]interface{}{
+		"image_count": len(images),
+		"model_name":  g.modelName,
+	})
+
+	// Log image details for debugging
+	for i, img := range images {
+		dataSize := len(img.Data)
+		logger.LogInfo("ExtractBusinessCardData", "Processing image", map[string]interface{}{
+			"image_index":  i,
+			"file_name":    img.FileName,
+			"content_type": img.ContentType,
+			"data_size":    dataSize,
+			"has_data":     dataSize > 0,
+		})
+
+		if dataSize == 0 {
+			logger.LogError("ExtractBusinessCardData", fmt.Errorf("empty image data"), map[string]interface{}{
+				"image_index": i,
+				"file_name":   img.FileName,
+			})
+			return nil, fmt.Errorf("image %d (%s) has no data", i, img.FileName)
+		}
+
+		if dataSize < 100 {
+			logger.LogWarn("ExtractBusinessCardData", "Image data seems too small", map[string]interface{}{
+				"image_index": i,
+				"file_name":   img.FileName,
+				"data_size":   dataSize,
+			})
+		}
+	}
+
 	prompt := g.buildExtractionPrompt()
+	logger.LogDebug("ExtractBusinessCardData", "Built extraction prompt", map[string]interface{}{
+		"prompt_length": len(prompt),
+	})
 
 	// Prepare parts for the request
 	parts := []*genai.Part{{Text: prompt}}
 
 	// Add images to the request
-	for _, img := range images {
+	for i, img := range images {
+		if len(img.Data) == 0 {
+			logger.LogError("ExtractBusinessCardData", fmt.Errorf("skipping empty image"), map[string]interface{}{
+				"image_index": i,
+				"file_name":   img.FileName,
+			})
+			continue
+		}
+
+		logger.LogInfo("ExtractBusinessCardData", "Adding image to Gemini request", map[string]interface{}{
+			"image_index":  i,
+			"file_name":    img.FileName,
+			"content_type": img.ContentType,
+			"data_size":    len(img.Data),
+		})
+
 		parts = append(parts, &genai.Part{
 			InlineData: &genai.Blob{Data: img.Data, MIMEType: img.ContentType},
 		})
 	}
 
+	logger.LogInfo("ExtractBusinessCardData", "Sending request to Gemini", map[string]interface{}{
+		"total_parts": len(parts),
+		"model_name":  g.modelName,
+	})
+
 	contents := []*genai.Content{{Parts: parts}}
 	resp, err := g.client.Models.GenerateContent(ctx, g.modelName, contents, nil)
 	if err != nil {
+		logger.LogError("ExtractBusinessCardData", err, map[string]interface{}{
+			"step":        "generate_content",
+			"model_name":  g.modelName,
+			"image_count": len(images),
+		})
 		return nil, fmt.Errorf("failed to generate content: %w", err)
 	}
 
+	logger.LogInfo("ExtractBusinessCardData", "Received response from Gemini", map[string]interface{}{
+		"candidate_count": len(resp.Candidates),
+	})
+
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		logger.LogError("ExtractBusinessCardData", fmt.Errorf("no content generated"), map[string]interface{}{
+			"candidate_count": len(resp.Candidates),
+		})
 		return nil, fmt.Errorf("no content generated")
 	}
 
 	// Extract the JSON response
 	responseText := fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0].Text)
+	logger.LogInfo("ExtractBusinessCardData", "Processing Gemini response", map[string]interface{}{
+		"response_length": len(responseText),
+	})
+
+	logger.LogDebug("ExtractBusinessCardData", "Full Gemini response", map[string]interface{}{
+		"response": responseText,
+	})
 
 	// Clean the response to extract JSON
 	jsonStr := g.extractJSONFromResponse(responseText)
+	logger.LogInfo("ExtractBusinessCardData", "Extracted JSON from response", map[string]interface{}{
+		"json_length": len(jsonStr),
+	})
 
 	// Parse the extracted data
 	var extractedData struct {
@@ -67,8 +150,17 @@ func (g *GeminiService) ExtractBusinessCardData(ctx context.Context, images []mo
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &extractedData); err != nil {
+		logger.LogError("ExtractBusinessCardData", err, map[string]interface{}{
+			"step":        "json_unmarshal",
+			"json_string": jsonStr,
+		})
 		return nil, fmt.Errorf("failed to parse extracted data: %w", err)
 	}
+
+	logger.LogInfo("ExtractBusinessCardData", "Successfully parsed extracted data", map[string]interface{}{
+		"personal_name": extractedData.PersonalData.FullName,
+		"company_name":  extractedData.CompanyData.Name,
+	})
 
 	businessCard := &models.BusinessCard{
 		PersonalData:  extractedData.PersonalData,

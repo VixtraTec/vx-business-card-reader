@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"business-card-reader/internal/logger"
 	"business-card-reader/internal/models"
 
 	"github.com/google/uuid"
@@ -13,52 +14,170 @@ import (
 type BusinessCardService struct {
 	dynamoService *DynamoService
 	geminiService *GeminiService
+	s3Service     *S3Service
 }
 
-func NewBusinessCardService(dynamoService *DynamoService, geminiService *GeminiService) *BusinessCardService {
+func NewBusinessCardService(dynamoService *DynamoService, geminiService *GeminiService, s3Service *S3Service) *BusinessCardService {
 	return &BusinessCardService{
 		dynamoService: dynamoService,
 		geminiService: geminiService,
+		s3Service:     s3Service,
 	}
 }
 
-func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []models.ImageUpload) (*models.BusinessCard, error) {
-	// Convert uploads to image data
-	imageData := make([]models.ImageData, len(images))
-	for i, upload := range images {
-		imageData[i] = models.ImageData{
-			FileName:    upload.FileName,
-			ContentType: upload.ContentType,
-			Data:        upload.Data,
-			Size:        int64(len(upload.Data)),
-			UploadedAt:  time.Now(),
+// deepCopyBusinessCard creates a deep copy of BusinessCard without binary data
+func (b *BusinessCardService) deepCopyBusinessCard(original *models.BusinessCard) *models.BusinessCard {
+	copy := *original
+
+	// Deep copy the Images slice
+	copy.Images = make([]models.ImageData, len(original.Images))
+	for i, img := range original.Images {
+		copy.Images[i] = models.ImageData{
+			FileName:    img.FileName,
+			ContentType: img.ContentType,
+			Size:        img.Size,
+			S3Key:       img.S3Key,
+			S3URL:       img.S3URL,
+			Data:        nil, // Exclude binary data for DynamoDB
+			Base64Data:  "",  // Exclude base64 data for DynamoDB
+			UploadedAt:  img.UploadedAt,
 		}
 	}
 
+	return &copy
+}
+
+func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []models.ImageUpload) (*models.BusinessCard, error) {
+	logger.LogInfo("ProcessBusinessCard", "Starting business card processing", map[string]interface{}{
+		"image_count": len(images),
+	})
+
+	// Upload images to S3 and convert uploads to image data
+	imageData := make([]models.ImageData, len(images))
+	for i, upload := range images {
+		logger.LogDebug("ProcessBusinessCard", "Processing image for S3 upload", map[string]interface{}{
+			"index":        i,
+			"file_name":    upload.FileName,
+			"content_type": upload.ContentType,
+			"size":         len(upload.Data),
+		})
+
+		// Upload image to S3
+		s3Key, s3URL, err := b.s3Service.UploadImage(ctx, upload.Data, upload.FileName, upload.ContentType)
+		if err != nil {
+			logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+				"step":      "s3_upload",
+				"file_name": upload.FileName,
+			})
+			return nil, fmt.Errorf("failed to upload image %s to S3: %w", upload.FileName, err)
+		}
+
+		logger.LogInfo("ProcessBusinessCard", "Image uploaded to S3", map[string]interface{}{
+			"file_name": upload.FileName,
+			"s3_key":    s3Key,
+			"s3_url":    s3URL,
+		})
+
+		imageData[i] = models.ImageData{
+			FileName:    upload.FileName,
+			ContentType: upload.ContentType,
+			Size:        int64(len(upload.Data)),
+			S3Key:       s3Key,
+			S3URL:       s3URL,
+			Data:        upload.Data, // Keep data for Gemini processing
+			UploadedAt:  time.Now(),
+		}
+
+		// Log immediately after creation
+		logger.LogInfo("ProcessBusinessCard", "ImageData created", map[string]interface{}{
+			"index":          i,
+			"file_name":      imageData[i].FileName,
+			"original_size":  len(upload.Data),
+			"stored_size":    len(imageData[i].Data),
+			"data_preserved": len(imageData[i].Data) > 0,
+		})
+	}
+
 	// Create initial business card record
+	businessCardID := uuid.New().String()
 	businessCard := &models.BusinessCard{
-		ID:        uuid.New().String(),
+		ID:        businessCardID,
 		Images:    imageData,
 		Status:    models.StatusPending,
 		CreatedAt: time.Now(),
 	}
 
+	logger.LogInfo("ProcessBusinessCard", "Created business card record", map[string]interface{}{
+		"business_card_id": businessCardID,
+		"status":           models.StatusPending,
+	})
+
+	// Log image data in business card record
+	for i, img := range businessCard.Images {
+		logger.LogInfo("ProcessBusinessCard", "Image data in business card record", map[string]interface{}{
+			"business_card_id": businessCardID,
+			"image_index":      i,
+			"file_name":        img.FileName,
+			"data_size":        len(img.Data),
+			"has_data":         len(img.Data) > 0,
+		})
+	}
+
+	// Create deep copy without binary data for DynamoDB
+	businessCardCopy := b.deepCopyBusinessCard(businessCard)
+
 	// Save initial record
-	err := b.dynamoService.SaveBusinessCard(ctx, businessCard)
+	err := b.dynamoService.SaveBusinessCard(ctx, businessCardCopy)
 	if err != nil {
+		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+			"step":             "save_initial_record",
+			"business_card_id": businessCardID,
+		})
 		return nil, fmt.Errorf("failed to save initial business card: %w", err)
 	}
 
+	logger.LogInfo("ProcessBusinessCard", "Initial record saved to DynamoDB", map[string]interface{}{
+		"business_card_id": businessCardID,
+	})
+
 	// Try to process with Gemini
 	businessCard.Status = models.StatusProcessing
-	err = b.dynamoService.SaveBusinessCard(ctx, businessCard)
+
+	// Create deep copy without binary data for DynamoDB
+	businessCardCopy = b.deepCopyBusinessCard(businessCard)
+
+	err = b.dynamoService.SaveBusinessCard(ctx, businessCardCopy)
 	if err != nil {
+		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+			"step":             "update_processing_status",
+			"business_card_id": businessCardID,
+		})
 		return nil, fmt.Errorf("failed to update business card status: %w", err)
+	}
+
+	logger.LogInfo("ProcessBusinessCard", "Starting Gemini processing", map[string]interface{}{
+		"business_card_id": businessCardID,
+	})
+
+	// Log image data before sending to Gemini
+	for i, img := range imageData {
+		logger.LogInfo("ProcessBusinessCard", "Image data before Gemini", map[string]interface{}{
+			"business_card_id": businessCardID,
+			"image_index":      i,
+			"file_name":        img.FileName,
+			"data_size":        len(img.Data),
+			"has_data":         len(img.Data) > 0,
+		})
 	}
 
 	// Extract data using Gemini
 	processedCard, err := b.geminiService.ExtractBusinessCardData(ctx, imageData)
 	if err != nil {
+		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+			"step":             "gemini_processing",
+			"business_card_id": businessCardID,
+		})
+
 		// Update card with error information
 		businessCard.Status = models.StatusFailed
 		businessCard.Error = err.Error()
@@ -66,14 +185,30 @@ func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []
 		now := time.Now()
 		businessCard.LastRetryAt = &now
 
+		// Create deep copy without binary data for DynamoDB
+		businessCardCopy := b.deepCopyBusinessCard(businessCard)
+
 		// Save failed state
-		saveErr := b.dynamoService.SaveBusinessCard(ctx, businessCard)
+		saveErr := b.dynamoService.SaveBusinessCard(ctx, businessCardCopy)
 		if saveErr != nil {
+			logger.LogError("ProcessBusinessCard", saveErr, map[string]interface{}{
+				"step":             "save_failed_state",
+				"business_card_id": businessCardID,
+			})
 			return nil, fmt.Errorf("failed to save error state: %w", saveErr)
 		}
 
+		logger.LogWarn("ProcessBusinessCard", "Business card marked as failed", map[string]interface{}{
+			"business_card_id": businessCardID,
+			"error":            err.Error(),
+		})
+
 		return businessCard, fmt.Errorf("failed to process business card: %w", err)
 	}
+
+	logger.LogInfo("ProcessBusinessCard", "Gemini processing completed", map[string]interface{}{
+		"business_card_id": businessCardID,
+	})
 
 	// Update with processed data
 	businessCard.PersonalData = processedCard.PersonalData
@@ -82,11 +217,23 @@ func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []
 	businessCard.ProcessedAt = time.Now()
 	businessCard.Status = models.StatusCompleted
 
+	// Create deep copy without binary data for DynamoDB
+	businessCardCopy = b.deepCopyBusinessCard(businessCard)
+
 	// Save final state
-	err = b.dynamoService.SaveBusinessCard(ctx, businessCard)
+	err = b.dynamoService.SaveBusinessCard(ctx, businessCardCopy)
 	if err != nil {
+		logger.LogError("ProcessBusinessCard", err, map[string]interface{}{
+			"step":             "save_final_state",
+			"business_card_id": businessCardID,
+		})
 		return nil, fmt.Errorf("failed to save processed business card: %w", err)
 	}
+
+	logger.LogInfo("ProcessBusinessCard", "Business card processing completed successfully", map[string]interface{}{
+		"business_card_id": businessCardID,
+		"status":           models.StatusCompleted,
+	})
 
 	return businessCard, nil
 }
@@ -100,6 +247,17 @@ func (b *BusinessCardService) RetryFailedProcessing(ctx context.Context, id stri
 
 	if businessCard.Status != models.StatusFailed {
 		return nil, fmt.Errorf("business card is not in failed state")
+	}
+
+	// Download images from S3 to retry processing
+	for i := range businessCard.Images {
+		if businessCard.Images[i].S3Key != "" {
+			data, err := b.s3Service.GetImage(ctx, businessCard.Images[i].S3Key)
+			if err != nil {
+				return nil, fmt.Errorf("failed to download image from S3: %w", err)
+			}
+			businessCard.Images[i].Data = data
+		}
 	}
 
 	// Update status to retrying
@@ -121,6 +279,11 @@ func (b *BusinessCardService) RetryFailedProcessing(ctx context.Context, id stri
 		businessCard.Status = models.StatusFailed
 		businessCard.Error = err.Error()
 
+		// Clear binary data before saving
+		for i := range businessCard.Images {
+			businessCard.Images[i].Data = nil
+		}
+
 		// Save failed state
 		saveErr := b.dynamoService.SaveBusinessCard(ctx, businessCard)
 		if saveErr != nil {
@@ -137,6 +300,11 @@ func (b *BusinessCardService) RetryFailedProcessing(ctx context.Context, id stri
 	businessCard.ProcessedAt = time.Now()
 	businessCard.Status = models.StatusCompleted
 	businessCard.Error = "" // Clear any previous error
+
+	// Clear binary data before saving final state
+	for i := range businessCard.Images {
+		businessCard.Images[i].Data = nil
+	}
 
 	// Save final state
 	err = b.dynamoService.SaveBusinessCard(ctx, businessCard)

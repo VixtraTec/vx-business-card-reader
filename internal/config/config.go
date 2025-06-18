@@ -10,6 +10,10 @@ type Config struct {
 		Region    string
 		TableName string
 	}
+	S3 struct {
+		BucketName string
+		Region     string
+	}
 	Gemini struct {
 		APIKey    string
 		ModelName string
@@ -22,6 +26,10 @@ func Load() (*Config, error) {
 	// AWS Configuration
 	cfg.AWS.Region = getEnvOrDefault("AWS_REGION", "us-east-1")
 	cfg.AWS.TableName = getEnvOrDefault("DYNAMODB_TABLE_NAME", "business-cards")
+
+	// S3 Configuration
+	cfg.S3.BucketName = getEnvOrDefault("S3_BUCKET_NAME", "vx-src-api-test")
+	cfg.S3.Region = getEnvOrDefault("S3_REGION", "us-east-1")
 
 	// Gemini Configuration
 	cfg.Gemini.APIKey = os.Getenv("GEMINI_API_KEY")

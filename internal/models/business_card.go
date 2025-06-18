@@ -6,67 +6,69 @@ import (
 
 // BusinessCard represents the complete business card data structure
 type BusinessCard struct {
-	ID            string       `json:"id" dynamodbav:"id"`
-	PersonalData  PersonalData `json:"personal_data" dynamodbav:"personal_data"`
-	CompanyData   CompanyData  `json:"company_data" dynamodbav:"company_data"`
-	Images        []ImageData  `json:"images" dynamodbav:"images"`
-	ExtractedText string       `json:"extracted_text" dynamodbav:"extracted_text"`
-	ProcessedAt   time.Time    `json:"processed_at" dynamodbav:"processed_at"`
-	CreatedAt     time.Time    `json:"created_at" dynamodbav:"created_at"`
-	Status        string       `json:"status" dynamodbav:"status"`
-	Error         string       `json:"error,omitempty" dynamodbav:"error,omitempty"`
-	RetryCount    int          `json:"retry_count" dynamodbav:"retry_count"`
-	LastRetryAt   *time.Time   `json:"last_retry_at,omitempty" dynamodbav:"last_retry_at,omitempty"`
+	ID            string       `json:"id" dynamodb:"id"`
+	PersonalData  PersonalData `json:"personal_data" dynamodb:"personal_data"`
+	CompanyData   CompanyData  `json:"company_data" dynamodb:"company_data"`
+	Images        []ImageData  `json:"images" dynamodb:"images"`
+	ExtractedText string       `json:"extracted_text" dynamodb:"extracted_text"`
+	ProcessedAt   time.Time    `json:"processed_at" dynamodb:"processed_at"`
+	CreatedAt     time.Time    `json:"created_at" dynamodb:"created_at"`
+	Status        string       `json:"status" dynamodb:"status"`
+	Error         string       `json:"error,omitempty" dynamodb:"error,omitempty"`
+	RetryCount    int          `json:"retry_count" dynamodb:"retry_count"`
+	LastRetryAt   *time.Time   `json:"last_retry_at,omitempty" dynamodb:"last_retry_at,omitempty"`
 }
 
 // PersonalData contains personal information extracted from business card
 type PersonalData struct {
-	FullName   string `json:"full_name" dynamodbav:"full_name"`
-	FirstName  string `json:"first_name" dynamodbav:"first_name"`
-	LastName   string `json:"last_name" dynamodbav:"last_name"`
-	JobTitle   string `json:"job_title" dynamodbav:"job_title"`
-	Department string `json:"department" dynamodbav:"department"`
-	Email      string `json:"email" dynamodbav:"email"`
-	Phone      string `json:"phone" dynamodbav:"phone"`
-	Mobile     string `json:"mobile" dynamodbav:"mobile"`
-	LinkedIn   string `json:"linkedin" dynamodbav:"linkedin"`
-	Website    string `json:"website" dynamodbav:"website"`
+	FullName   string `json:"full_name" dynamodb:"full_name"`
+	FirstName  string `json:"first_name" dynamodb:"first_name"`
+	LastName   string `json:"last_name" dynamodb:"last_name"`
+	JobTitle   string `json:"job_title" dynamodb:"job_title"`
+	Department string `json:"department" dynamodb:"department"`
+	Email      string `json:"email" dynamodb:"email"`
+	Phone      string `json:"phone" dynamodb:"phone"`
+	Mobile     string `json:"mobile" dynamodb:"mobile"`
+	LinkedIn   string `json:"linkedin" dynamodb:"linkedin"`
+	Website    string `json:"website" dynamodb:"website"`
 }
 
 // CompanyData contains company information extracted from business card
 type CompanyData struct {
-	Name        string  `json:"name" dynamodbav:"name"`
-	Industry    string  `json:"industry" dynamodbav:"industry"`
-	Website     string  `json:"website" dynamodbav:"website"`
-	Email       string  `json:"email" dynamodbav:"email"`
-	Phone       string  `json:"phone" dynamodbav:"phone"`
-	Address     Address `json:"address" dynamodbav:"address"`
+	Name        string  `json:"name" dynamodb:"name"`
+	Industry    string  `json:"industry" dynamodb:"industry"`
+	Website     string  `json:"website" dynamodb:"website"`
+	Email       string  `json:"email" dynamodb:"email"`
+	Phone       string  `json:"phone" dynamodb:"phone"`
+	Address     Address `json:"address" dynamodb:"address"`
 	SocialMedia struct {
-		LinkedIn  string `json:"linkedin" dynamodbav:"linkedin"`
-		Twitter   string `json:"twitter" dynamodbav:"twitter"`
-		Facebook  string `json:"facebook" dynamodbav:"facebook"`
-		Instagram string `json:"instagram" dynamodbav:"instagram"`
-	} `json:"social_media" dynamodbav:"social_media"`
+		LinkedIn  string `json:"linkedin" dynamodb:"linkedin"`
+		Twitter   string `json:"twitter" dynamodb:"twitter"`
+		Facebook  string `json:"facebook" dynamodb:"facebook"`
+		Instagram string `json:"instagram" dynamodb:"instagram"`
+	} `json:"social_media" dynamodb:"social_media"`
 }
 
 // Address represents the company address
 type Address struct {
-	Street     string `json:"street" dynamodbav:"street"`
-	City       string `json:"city" dynamodbav:"city"`
-	State      string `json:"state" dynamodbav:"state"`
-	PostalCode string `json:"postal_code" dynamodbav:"postal_code"`
-	Country    string `json:"country" dynamodbav:"country"`
-	Full       string `json:"full" dynamodbav:"full"`
+	Street     string `json:"street" dynamodb:"street"`
+	City       string `json:"city" dynamodb:"city"`
+	State      string `json:"state" dynamodb:"state"`
+	PostalCode string `json:"postal_code" dynamodb:"postal_code"`
+	Country    string `json:"country" dynamodb:"country"`
+	Full       string `json:"full" dynamodb:"full"`
 }
 
 // ImageData represents uploaded image information
 type ImageData struct {
-	FileName    string    `json:"file_name" dynamodbav:"file_name"`
-	ContentType string    `json:"content_type" dynamodbav:"content_type"`
-	Size        int64     `json:"size" dynamodbav:"size"`
-	Data        []byte    `json:"data" dynamodbav:"data"`
-	Base64Data  string    `json:"base64_data" dynamodbav:"-"`
-	UploadedAt  time.Time `json:"uploaded_at" dynamodbav:"uploaded_at"`
+	FileName    string    `json:"file_name" dynamodb:"file_name"`
+	ContentType string    `json:"content_type" dynamodb:"content_type"`
+	Size        int64     `json:"size" dynamodb:"size"`
+	S3Key       string    `json:"s3_key" dynamodb:"s3_key"`
+	S3URL       string    `json:"s3_url" dynamodb:"s3_url"`
+	Data        []byte    `json:"data,omitempty" dynamodb:"-"`
+	Base64Data  string    `json:"base64_data,omitempty" dynamodb:"-"`
+	UploadedAt  time.Time `json:"uploaded_at" dynamodb:"uploaded_at"`
 }
 
 // BusinessCardRequest represents the request payload for processing business cards
@@ -79,6 +81,22 @@ type ImageUpload struct {
 	FileName    string `json:"file_name"`
 	ContentType string `json:"content_type"`
 	Data        []byte `json:"data"`
+}
+
+// Base64ImageUpload represents an image uploaded as base64
+type Base64ImageUpload struct {
+	FileName     string `json:"file_name"`
+	ContentType  string `json:"content_type"`
+	Size         int64  `json:"size"`
+	Base64Data   string `json:"base64_data"`
+	LastModified int64  `json:"last_modified"`
+}
+
+// Base64BusinessCardRequest represents the request payload for processing business cards with base64 images
+type Base64BusinessCardRequest struct {
+	Images      []Base64ImageUpload `json:"images"`
+	Timestamp   string              `json:"timestamp"`
+	TotalImages int                 `json:"total_images"`
 }
 
 // BusinessCardResponse represents the API response

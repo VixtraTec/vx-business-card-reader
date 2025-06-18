@@ -8,6 +8,7 @@ import (
 	"business-card-reader/docs"
 	"business-card-reader/internal/config"
 	"business-card-reader/internal/handlers"
+	"business-card-reader/internal/logger"
 	"business-card-reader/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -22,13 +23,20 @@ import (
 // @host localhost:8080
 // @BasePath /api/v1
 func main() {
+	// Initialize logger first
+	logger.Init()
+
 	// Load .env file
 	_ = godotenv.Load()
+
+	logger.LogInfo("main", "Application starting", map[string]interface{}{
+		"version": "1.0.0",
+	})
 
 	// Log environment variables for debugging (mask sensitive values)
 	log.Println("Loaded environment variables:")
 	for _, key := range []string{
-		"GEMINI_API_KEY", "GEMINI_MODEL_NAME", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "DYNAMODB_TABLE_NAME", "PORT", "GIN_MODE", "AWS_ENDPOINT_URL"} {
+		"GEMINI_API_KEY", "GEMINI_MODEL_NAME", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "DYNAMODB_TABLE_NAME", "S3_BUCKET_NAME", "S3_REGION", "PORT", "GIN_MODE", "AWS_ENDPOINT_URL"} {
 		val := os.Getenv(key)
 		if val == "" {
 			log.Printf("  %s=NOT SET", key)
@@ -56,12 +64,17 @@ func main() {
 		log.Fatal("Failed to initialize DynamoDB service:", err)
 	}
 
+	s3Service, err := services.NewS3Service(cfg.S3.Region, cfg.S3.BucketName)
+	if err != nil {
+		log.Fatal("Failed to initialize S3 service:", err)
+	}
+
 	geminiService, err := services.NewGeminiService(cfg.Gemini.APIKey, cfg.Gemini.ModelName)
 	if err != nil {
 		log.Fatal("Failed to initialize Gemini service:", err)
 	}
 
-	businessCardService := services.NewBusinessCardService(dynamoService, geminiService)
+	businessCardService := services.NewBusinessCardService(dynamoService, geminiService, s3Service)
 
 	// Initialize handlers
 	handler := handlers.NewBusinessCardHandler(businessCardService)
