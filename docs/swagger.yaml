@@ -15,6 +15,32 @@ definitions:
       street:
         type: string
     type: object
+  models.Base64BusinessCardRequest:
+    properties:
+      images:
+        items:
+          $ref: '#/definitions/models.Base64ImageUpload'
+        type: array
+      observation:
+        type: string
+      timestamp:
+        type: string
+      total_images:
+        type: integer
+    type: object
+  models.Base64ImageUpload:
+    properties:
+      base64_data:
+        type: string
+      content_type:
+        type: string
+      file_name:
+        type: string
+      last_modified:
+        type: integer
+      size:
+        type: integer
+    type: object
   models.BusinessCard:
     properties:
       company_data:
@@ -32,6 +58,8 @@ definitions:
           $ref: '#/definitions/models.ImageData'
         type: array
       last_retry_at:
+        type: string
+      observation:
         type: string
       personal_data:
         $ref: '#/definitions/models.PersonalData'
@@ -92,6 +120,8 @@ definitions:
     type: object
   models.ImageData:
     properties:
+      base64_data:
+        type: string
       content_type:
         type: string
       data:
@@ -99,6 +129,10 @@ definitions:
           type: integer
         type: array
       file_name:
+        type: string
+      s3_key:
+        type: string
+      s3_url:
         type: string
       size:
         type: integer
@@ -128,6 +162,11 @@ definitions:
       website:
         type: string
     type: object
+  models.UpdateObservationRequest:
+    properties:
+      observation:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -155,13 +194,19 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload and process business card images using Gemini AI
+      - application/json
+      description: Upload and process business card images using Gemini AI. Supports
+        both multipart/form-data and JSON with base64 images
       parameters:
-      - description: Business card images (max 2)
+      - description: Business card images (max 2) - for multipart upload
         in: formData
         name: images
-        required: true
         type: file
+      - description: Business card images in base64 format - for JSON upload
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/models.Base64BusinessCardRequest'
       produces:
       - application/json
       responses:
@@ -205,6 +250,45 @@ paths:
           schema:
             $ref: '#/definitions/models.BusinessCardResponse'
       summary: Get business card by ID
+      tags:
+      - business-cards
+  /business-cards/{id}/observation:
+    put:
+      consumes:
+      - application/json
+      description: Update the observation field of a business card
+      parameters:
+      - description: Business Card ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Observation update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.UpdateObservationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.BusinessCardResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.BusinessCardResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.BusinessCardResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.BusinessCardResponse'
+      summary: Update business card observation
       tags:
       - business-cards
   /business-cards/{id}/retry:

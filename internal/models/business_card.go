@@ -11,6 +11,7 @@ type BusinessCard struct {
 	CompanyData   CompanyData  `json:"company_data" dynamodb:"company_data"`
 	Images        []ImageData  `json:"images" dynamodb:"images"`
 	ExtractedText string       `json:"extracted_text" dynamodb:"extracted_text"`
+	Observation   string       `json:"observation" dynamodb:"observation"`
 	ProcessedAt   time.Time    `json:"processed_at" dynamodb:"processed_at"`
 	CreatedAt     time.Time    `json:"created_at" dynamodb:"created_at"`
 	Status        string       `json:"status" dynamodb:"status"`
@@ -97,6 +98,7 @@ type Base64BusinessCardRequest struct {
 	Images      []Base64ImageUpload `json:"images"`
 	Timestamp   string              `json:"timestamp"`
 	TotalImages int                 `json:"total_images"`
+	Observation string              `json:"observation"`
 }
 
 // BusinessCardResponse represents the API response
@@ -112,6 +114,11 @@ type BusinessCardListResponse struct {
 	Data    []BusinessCard `json:"data,omitempty"`
 	Count   int            `json:"count"`
 	Error   string         `json:"error,omitempty"`
+}
+
+// UpdateObservationRequest represents the request for updating observation
+type UpdateObservationRequest struct {
+	Observation string `json:"observation"`
 }
 
 // BusinessCardStatus represents the possible states of a business card

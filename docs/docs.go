@@ -41,9 +41,10 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Upload and process business card images using Gemini AI",
+                "description": "Upload and process business card images using Gemini AI. Supports both multipart/form-data and JSON with base64 images",
                 "consumes": [
-                    "multipart/form-data"
+                    "multipart/form-data",
+                    "application/json"
                 ],
                 "produces": [
                     "application/json"
@@ -55,10 +56,17 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Business card images (max 2)",
+                        "description": "Business card images (max 2) - for multipart upload",
                         "name": "images",
-                        "in": "formData",
-                        "required": true
+                        "in": "formData"
+                    },
+                    {
+                        "description": "Business card images in base64 format - for JSON upload",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Base64BusinessCardRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -150,6 +158,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/business-cards/{id}/observation": {
+            "put": {
+                "description": "Update the observation field of a business card",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "business-cards"
+                ],
+                "summary": "Update business card observation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Business Card ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Observation update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.UpdateObservationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.BusinessCardResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.BusinessCardResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/models.BusinessCardResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.BusinessCardResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/business-cards/{id}/retry": {
             "post": {
                 "description": "Retry processing a failed business card",
@@ -216,6 +283,46 @@ const docTemplate = `{
                 }
             }
         },
+        "models.Base64BusinessCardRequest": {
+            "type": "object",
+            "properties": {
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Base64ImageUpload"
+                    }
+                },
+                "observation": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "total_images": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.Base64ImageUpload": {
+            "type": "object",
+            "properties": {
+                "base64_data": {
+                    "type": "string"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "last_modified": {
+                    "type": "integer"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.BusinessCard": {
             "type": "object",
             "properties": {
@@ -241,6 +348,9 @@ const docTemplate = `{
                     }
                 },
                 "last_retry_at": {
+                    "type": "string"
+                },
+                "observation": {
                     "type": "string"
                 },
                 "personal_data": {
@@ -334,6 +444,9 @@ const docTemplate = `{
         "models.ImageData": {
             "type": "object",
             "properties": {
+                "base64_data": {
+                    "type": "string"
+                },
                 "content_type": {
                     "type": "string"
                 },
@@ -344,6 +457,12 @@ const docTemplate = `{
                     }
                 },
                 "file_name": {
+                    "type": "string"
+                },
+                "s3_key": {
+                    "type": "string"
+                },
+                "s3_url": {
                     "type": "string"
                 },
                 "size": {
@@ -385,6 +504,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "website": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.UpdateObservationRequest": {
+            "type": "object",
+            "properties": {
+                "observation": {
                     "type": "string"
                 }
             }

@@ -113,6 +113,7 @@ func main() {
 		api.POST("/business-cards", handler.ProcessBusinessCard)
 		api.GET("/business-cards", handler.GetBusinessCards)
 		api.GET("/business-cards/:id", handler.GetBusinessCardByID)
+		api.PUT("/business-cards/:id/observation", handler.UpdateObservation)
 		api.POST("/business-cards/:id/retry", handler.RetryFailedBusinessCard)
 		api.GET("/business-cards/failed", handler.GetFailedBusinessCards)
 	}

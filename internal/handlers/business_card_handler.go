@@ -182,7 +182,7 @@ func (h *BusinessCardHandler) processBusinessCardFromJSON(c *gin.Context) {
 	})
 
 	// Process the business card
-	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads)
+	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads, request.Observation)
 	if err != nil {
 		logger.LogError("processBusinessCardFromJSON", err, map[string]interface{}{
 			"step": "business_card_processing",
@@ -278,8 +278,8 @@ func (h *BusinessCardHandler) processBusinessCardFromMultipart(c *gin.Context) {
 		})
 	}
 
-	// Process the business card
-	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads)
+	// Process the business card (no observation for multipart uploads)
+	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
 			Success: false,
@@ -458,5 +458,67 @@ func (h *BusinessCardHandler) GetFailedBusinessCards(c *gin.Context) {
 		Success: true,
 		Data:    responseCards,
 		Count:   len(responseCards),
+	})
+}
+
+// @Summary Update business card observation
+// @Description Update the observation field of a business card
+// @Tags business-cards
+// @Accept json
+// @Produce json
+// @Param id path string true "Business Card ID"
+// @Param request body models.UpdateObservationRequest true "Observation update request"
+// @Success 200 {object} models.BusinessCardResponse
+// @Failure 400 {object} models.BusinessCardResponse
+// @Failure 404 {object} models.BusinessCardResponse
+// @Failure 500 {object} models.BusinessCardResponse
+// @Router /business-cards/{id}/observation [put]
+func (h *BusinessCardHandler) UpdateObservation(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
+			Success: false,
+			Error:   "Business card ID is required",
+		})
+		return
+	}
+
+	var request models.UpdateObservationRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		logger.LogError("UpdateObservation", err, map[string]interface{}{
+			"business_card_id": id,
+			"step":             "json_binding",
+		})
+		c.JSON(http.StatusBadRequest, models.BusinessCardResponse{
+			Success: false,
+			Error:   "Invalid JSON format: " + err.Error(),
+		})
+		return
+	}
+
+	logger.LogInfo("UpdateObservation", "Updating business card observation", map[string]interface{}{
+		"business_card_id":   id,
+		"observation_length": len(request.Observation),
+	})
+
+	businessCard, err := h.service.UpdateObservation(c.Request.Context(), id, request.Observation)
+	if err != nil {
+		logger.LogError("UpdateObservation", err, map[string]interface{}{
+			"business_card_id": id,
+		})
+		c.JSON(http.StatusNotFound, models.BusinessCardResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to update observation: %v", err),
+		})
+		return
+	}
+
+	logger.LogInfo("UpdateObservation", "Business card observation updated successfully", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	c.JSON(http.StatusOK, models.BusinessCardResponse{
+		Success: true,
+		Data:    *businessCard,
 	})
 }

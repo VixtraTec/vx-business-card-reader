@@ -50,9 +50,11 @@ func (b *BusinessCardService) deepCopyBusinessCard(original *models.BusinessCard
 	return &copy
 }
 
-func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []models.ImageUpload) (*models.BusinessCard, error) {
+func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []models.ImageUpload, observation string) (*models.BusinessCard, error) {
 	logger.LogInfo("ProcessBusinessCard", "Starting business card processing", map[string]interface{}{
-		"image_count": len(images),
+		"image_count":        len(images),
+		"has_observation":    observation != "",
+		"observation_length": len(observation),
 	})
 
 	// Upload images to S3 and convert uploads to image data
@@ -104,10 +106,11 @@ func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []
 	// Create initial business card record
 	businessCardID := uuid.New().String()
 	businessCard := &models.BusinessCard{
-		ID:        businessCardID,
-		Images:    imageData,
-		Status:    models.StatusPending,
-		CreatedAt: time.Now(),
+		ID:          businessCardID,
+		Images:      imageData,
+		Status:      models.StatusPending,
+		Observation: observation,
+		CreatedAt:   time.Now(),
 	}
 
 	logger.LogInfo("ProcessBusinessCard", "Created business card record", map[string]interface{}{
@@ -423,4 +426,40 @@ func (b *BusinessCardService) GetFailedBusinessCards(ctx context.Context) ([]mod
 
 func (b *BusinessCardService) InitializeDatabase(ctx context.Context) error {
 	return b.dynamoService.CreateTableIfNotExists(ctx)
+}
+
+func (b *BusinessCardService) UpdateObservation(ctx context.Context, id string, observation string) (*models.BusinessCard, error) {
+	logger.LogInfo("UpdateObservation", "Updating business card observation", map[string]interface{}{
+		"business_card_id":   id,
+		"observation_length": len(observation),
+	})
+
+	// Get the existing business card
+	businessCard, err := b.dynamoService.GetBusinessCard(ctx, id)
+	if err != nil {
+		logger.LogError("UpdateObservation", err, map[string]interface{}{
+			"business_card_id": id,
+			"step":             "get_business_card",
+		})
+		return nil, fmt.Errorf("failed to get business card: %w", err)
+	}
+
+	// Update the observation
+	businessCard.Observation = observation
+
+	// Save the updated business card
+	err = b.dynamoService.SaveBusinessCard(ctx, businessCard)
+	if err != nil {
+		logger.LogError("UpdateObservation", err, map[string]interface{}{
+			"business_card_id": id,
+			"step":             "save_business_card",
+		})
+		return nil, fmt.Errorf("failed to save updated business card: %w", err)
+	}
+
+	logger.LogInfo("UpdateObservation", "Business card observation updated successfully", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	return businessCard, nil
 }
