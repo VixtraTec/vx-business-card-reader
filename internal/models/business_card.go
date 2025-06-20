@@ -67,7 +67,7 @@ type ImageData struct {
 	S3Key       string    `json:"s3_key" dynamodb:"s3_key"`
 	S3URL       string    `json:"s3_url" dynamodb:"s3_url"`
 	Data        []byte    `json:"data,omitempty" dynamodb:"-"`
-	Base64Data  string    `json:"base64_data,omitempty" dynamodb:"-"`
+	Base64Data  string    `json:"base64_data" dynamodb:"-"`
 	UploadedAt  time.Time `json:"uploaded_at" dynamodb:"uploaded_at"`
 }
 

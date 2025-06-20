@@ -343,14 +343,26 @@ func (h *BusinessCardHandler) GetBusinessCardByID(c *gin.Context) {
 		return
 	}
 
-	businessCard, err := h.service.GetBusinessCard(c.Request.Context(), id)
+	logger.LogInfo("GetBusinessCardByID", "Getting business card by ID", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	businessCard, err := h.service.GetBusinessCardByIDWithImages(c.Request.Context(), id)
 	if err != nil {
+		logger.LogError("GetBusinessCardByID", err, map[string]interface{}{
+			"business_card_id": id,
+		})
 		c.JSON(http.StatusNotFound, models.BusinessCardResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Business card not found: %v", err),
 		})
 		return
 	}
+
+	logger.LogInfo("GetBusinessCardByID", "Business card retrieved successfully", map[string]interface{}{
+		"business_card_id": id,
+		"image_count":      len(businessCard.Images),
+	})
 
 	c.JSON(http.StatusOK, models.BusinessCardResponse{
 		Success: true,

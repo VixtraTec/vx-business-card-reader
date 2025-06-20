@@ -3,10 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"business-card-reader/internal/logger"
 	"business-card-reader/internal/models"
+
+	"encoding/base64"
 
 	"github.com/google/uuid"
 )
@@ -317,6 +320,97 @@ func (b *BusinessCardService) RetryFailedProcessing(ctx context.Context, id stri
 
 func (b *BusinessCardService) GetBusinessCard(ctx context.Context, id string) (*models.BusinessCard, error) {
 	return b.dynamoService.GetBusinessCard(ctx, id)
+}
+
+func (b *BusinessCardService) GetBusinessCardByIDWithImages(ctx context.Context, id string) (*models.BusinessCard, error) {
+	logger.LogInfo("GetBusinessCardByIDWithImages", "Getting business card with images", map[string]interface{}{
+		"business_card_id": id,
+	})
+
+	// Get business card from DynamoDB
+	businessCard, err := b.dynamoService.GetBusinessCard(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get business card: %w", err)
+	}
+
+	// Download images from S3 and convert to base64
+	for i := range businessCard.Images {
+		if businessCard.Images[i].S3Key != "" {
+			logger.LogInfo("GetBusinessCardByIDWithImages", "Attempting to download image from S3", map[string]interface{}{
+				"business_card_id": id,
+				"image_index":      i,
+				"s3_key":           businessCard.Images[i].S3Key,
+				"file_name":        businessCard.Images[i].FileName,
+				"s3_url":           businessCard.Images[i].S3URL,
+			})
+
+			// Download image data from S3
+			data, err := b.s3Service.GetImage(ctx, businessCard.Images[i].S3Key)
+			if err != nil {
+				// Categorize the error type for better debugging
+				errorType := "unknown"
+				if strings.Contains(err.Error(), "AccessDenied") {
+					errorType = "access_denied"
+				} else if strings.Contains(err.Error(), "NoSuchKey") {
+					errorType = "file_not_found"
+				} else if strings.Contains(err.Error(), "NoSuchBucket") {
+					errorType = "bucket_not_found"
+				}
+
+				logger.LogError("GetBusinessCardByIDWithImages", err, map[string]interface{}{
+					"business_card_id": id,
+					"image_index":      i,
+					"s3_key":           businessCard.Images[i].S3Key,
+					"step":             "s3_download",
+					"error_type":       errorType,
+					"s3_url":           businessCard.Images[i].S3URL,
+				})
+
+				// Don't fail the entire request for one image - just log the error and continue
+				businessCard.Images[i].Base64Data = ""
+				businessCard.Images[i].Data = nil
+				continue
+			}
+
+			// Convert to base64
+			base64Data := base64.StdEncoding.EncodeToString(data)
+			businessCard.Images[i].Base64Data = base64Data
+			businessCard.Images[i].Data = data // Also include raw data
+
+			logger.LogInfo("GetBusinessCardByIDWithImages", "Image downloaded and converted to base64", map[string]interface{}{
+				"business_card_id": id,
+				"image_index":      i,
+				"file_name":        businessCard.Images[i].FileName,
+				"data_size":        len(data),
+				"base64_size":      len(base64Data),
+				"success":          true,
+			})
+		} else {
+			logger.LogWarn("GetBusinessCardByIDWithImages", "No S3 key found for image", map[string]interface{}{
+				"business_card_id": id,
+				"image_index":      i,
+				"file_name":        businessCard.Images[i].FileName,
+			})
+		}
+	}
+
+	// Count successful downloads
+	successfulDownloads := 0
+	totalImages := len(businessCard.Images)
+	for _, img := range businessCard.Images {
+		if img.Base64Data != "" {
+			successfulDownloads++
+		}
+	}
+
+	logger.LogInfo("GetBusinessCardByIDWithImages", "Business card retrieval completed", map[string]interface{}{
+		"business_card_id":     id,
+		"total_images":         totalImages,
+		"successful_downloads": successfulDownloads,
+		"failed_downloads":     totalImages - successfulDownloads,
+	})
+
+	return businessCard, nil
 }
 
 func (b *BusinessCardService) GetAllBusinessCards(ctx context.Context) ([]models.BusinessCard, error) {
