@@ -12,6 +12,7 @@ type BusinessCard struct {
 	Images        []ImageData  `json:"images" dynamodb:"images"`
 	ExtractedText string       `json:"extracted_text" dynamodb:"extracted_text"`
 	Observation   string       `json:"observation" dynamodb:"observation"`
+	User          string       `json:"user" dynamodb:"user"`
 	ProcessedAt   time.Time    `json:"processed_at" dynamodb:"processed_at"`
 	CreatedAt     time.Time    `json:"created_at" dynamodb:"created_at"`
 	Status        string       `json:"status" dynamodb:"status"`
@@ -99,6 +100,7 @@ type Base64BusinessCardRequest struct {
 	Timestamp   string              `json:"timestamp"`
 	TotalImages int                 `json:"total_images"`
 	Observation string              `json:"observation"`
+	User        string              `json:"user"`
 }
 
 // BusinessCardResponse represents the API response

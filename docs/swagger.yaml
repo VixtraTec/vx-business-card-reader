@@ -27,6 +27,8 @@ definitions:
         type: string
       total_images:
         type: integer
+      user:
+        type: string
     type: object
   models.Base64ImageUpload:
     properties:
@@ -68,6 +70,8 @@ definitions:
       retry_count:
         type: integer
       status:
+        type: string
+      user:
         type: string
     type: object
   models.BusinessCardListResponse:

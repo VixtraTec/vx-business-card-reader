@@ -300,6 +300,9 @@ const docTemplate = `{
                 },
                 "total_images": {
                     "type": "integer"
+                },
+                "user": {
+                    "type": "string"
                 }
             }
         },
@@ -363,6 +366,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "user": {
                     "type": "string"
                 }
             }

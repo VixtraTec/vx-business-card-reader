@@ -50,11 +50,13 @@ func (b *BusinessCardService) deepCopyBusinessCard(original *models.BusinessCard
 	return &copy
 }
 
-func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []models.ImageUpload, observation string) (*models.BusinessCard, error) {
+func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []models.ImageUpload, observation string, user string) (*models.BusinessCard, error) {
 	logger.LogInfo("ProcessBusinessCard", "Starting business card processing", map[string]interface{}{
 		"image_count":        len(images),
 		"has_observation":    observation != "",
 		"observation_length": len(observation),
+		"user":               user,
+		"has_user":           user != "",
 	})
 
 	// Upload images to S3 and convert uploads to image data
@@ -110,6 +112,7 @@ func (b *BusinessCardService) ProcessBusinessCard(ctx context.Context, images []
 		Images:      imageData,
 		Status:      models.StatusPending,
 		Observation: observation,
+		User:        user,
 		CreatedAt:   time.Now(),
 	}
 

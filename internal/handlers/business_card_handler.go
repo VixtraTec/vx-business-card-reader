@@ -182,7 +182,7 @@ func (h *BusinessCardHandler) processBusinessCardFromJSON(c *gin.Context) {
 	})
 
 	// Process the business card
-	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads, request.Observation)
+	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads, request.Observation, request.User)
 	if err != nil {
 		logger.LogError("processBusinessCardFromJSON", err, map[string]interface{}{
 			"step": "business_card_processing",
@@ -278,8 +278,8 @@ func (h *BusinessCardHandler) processBusinessCardFromMultipart(c *gin.Context) {
 		})
 	}
 
-	// Process the business card (no observation for multipart uploads)
-	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads, "")
+	// Process the business card (no observation or user for multipart uploads)
+	businessCard, err := h.service.ProcessBusinessCard(c.Request.Context(), imageUploads, "", "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.BusinessCardResponse{
 			Success: false,

@@ -294,6 +294,9 @@
                 },
                 "total_images": {
                     "type": "integer"
+                },
+                "user": {
+                    "type": "string"
                 }
             }
         },
@@ -357,6 +360,9 @@
                     "type": "integer"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "user": {
                     "type": "string"
                 }
             }
